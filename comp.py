@@ -20,9 +20,7 @@ How to use:
 - Run comp.py.
 """
 
-### Change these if you need to.
-
-# Ram Limit (in MB)
+# Ram limit (in MB)
 ram_limit = 4000
 
 # Number of dark, bright, and high motion frames to algorithmically select.
