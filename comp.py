@@ -118,7 +118,7 @@ screen_separation = 10
 motion_diff_radius = 4
 
 ### Not recommended to change stuff below
-import os, sys, time, textwrap, re, uuid, random, pathlib, requests, vstools, webbrowser, colorama, shutil, zipfile, lzma, fractions
+import os, sys, time, textwrap, re, uuid, random, pathlib, requests, vstools, webbrowser, colorama, shutil, fractions
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 from natsort import os_sorted
 import anitopy as ani
@@ -126,7 +126,7 @@ import pyperclip as pc
 import vapoursynth as vs
 from requests import Session
 from functools import partial
-from requests_toolbelt import MultipartEncoder, MultipartEncoderMonitor
+from requests_toolbelt import MultipartEncoder
 from typing import Any, Dict, List, Optional, BinaryIO, Union, Callable, TypeVar, Sequence, cast
 RenderCallback = Callable[[int, vs.VideoFrame], None]
 VideoProp = Union[int, Sequence[int],float, Sequence[float],str, Sequence[str],vs.VideoNode, Sequence[vs.VideoNode],vs.VideoFrame, Sequence[vs.VideoFrame],Callable[..., Any], Sequence[Callable[..., Any]]]
