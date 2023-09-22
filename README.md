@@ -6,7 +6,7 @@ This script was originally written for VS R53 and Python 3.9. It's been tested o
 
 2. [Install Vapoursynth](https://github.com/vapoursynth/vapoursynth/releases)
 
-3. Install python dependencies:
+3. Install Python dependencies:
  ```powershell
  pip install pathlib anitopy pyperclip requests requests_toolbelt natsort vstools rich colorama
  ```
