@@ -1,6 +1,6 @@
 """
 I do not provide support for this unless its an actual error in the code and not related to your setup.
-This script was originally written on VS R53 with Python 3.9 & has been tested on VS R63 with Python 3.11.
+This script was originally written for VS R53 and Python 3.9. It's been tested on VS R63 and Python 3.11.
 
 You'll need:
 - Vapoursynth (https://github.com/vapoursynth/vapoursynth/releases)
