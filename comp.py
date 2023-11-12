@@ -30,7 +30,7 @@ frame_count_motion = 15
 # Choose your own frames to export. Does not decrease the number of algorithmically selected frames.
 user_frames = []
 # Number of frames to choose randomly. Completely separate from frame_count_bright, frame_count_dark, and save_frames. Will change every time you run the script.
-random_frames = 5
+random_frames = 0
 
 # Save the brightness data in a text file so it doesn't have to be reanalysed next time the script is run. Frames will be reanalysed if show/movie name or episode numbers change.
 # Does not save user_frames or random_frames.
@@ -44,6 +44,8 @@ frame_info = True
 upscale = True
 # Scale all videos to one vertical resolution. Set to 0 to disable, otherwise input the desired vertical res.
 single_res = 0
+# Compression level for ffmpeg. Range is 0-100.
+compression = 2
 
 # Automatically upload to slow.pics.
 slowpics = True
@@ -442,6 +444,32 @@ def estimate_read_time(file, chunk_size: int=15728640):
     estimated_time = (file_size / chunk_size) * elapsed_time
     return estimated_time
 
+#estimates time it would take to analyze a clip
+#default frames to read is 15
+def estimate_analysis_time(file, read_len: int=15):
+    clip = vs.core.lsmas.LWLibavSource(file)
+
+    #safeguard for if there arent enough frames in clip
+    while clip.num_frames / 3 + 1 < read_len:
+        read_len -= 1
+
+    clip1 = clip[int(clip.num_frames / 3) : int(clip.num_frames / 3) + read_len]
+    clip2 = clip[int(clip.num_frames * 2 / 3) : int(clip.num_frames * 2 / 3) + read_len]
+
+    def checkclip(n, f, clip):
+        avg = f.props["PlaneStatsAverage"]
+        return clip
+
+    start_time = time.time()
+    vstools.clip_async_render(vs.core.std.FrameEval(clip1, partial(checkclip, clip=clip1.std.PlaneStats()), prop_src=clip1.std.PlaneStats()))
+    elapsed_time = time.time() - start_time
+
+    start_time = time.time()
+    vstools.clip_async_render(vs.core.std.FrameEval(clip2, partial(checkclip, clip=clip2.std.PlaneStats()), prop_src=clip2.std.PlaneStats()))
+    elapsed_time = (elapsed_time + time.time() - start_time)/2
+
+    return elapsed_time
+
 #determine which file should be analyzed in order to select frames
 def evaluate_analyze_clip(analyze_clip, files, files_info):
     file_analysis_default = False
@@ -472,7 +500,7 @@ def evaluate_analyze_clip(analyze_clip, files, files_info):
     #default: pick file with smallest read time
     if file_analysis_default:
         print("Determining which file to analyze...\n")
-        estimated_times = [estimate_read_time(file) for file in files]
+        estimated_times = [estimate_analysis_time(file) for file in files]
         first_file = files[estimated_times.index(min(estimated_times))]
     
     return first_file
@@ -872,7 +900,7 @@ def actual_script():
                 #generate screens with ffmpeg
                 for i, path_image in enumerate(path_images):
 
-                    ffmpeg_line = f"ffmpeg -y -hide_banner -loglevel error -f rawvideo -video_size {clip.width}x{clip.height} -pixel_format gbrp -framerate {str(clip.fps)} -i pipe: -pred mixed -ss {i} -t 1 \"{path_image}\""
+                    ffmpeg_line = f"ffmpeg -y -hide_banner -loglevel error -f rawvideo -video_size {clip.width}x{clip.height} -pixel_format gbrp -framerate {str(clip.fps)} -i pipe: -pred mixed -ss {i} -t 1 -compression_level {compression} \"{path_image}\""
                     try:
                         with subprocess.Popen(ffmpeg_line, stdin=subprocess.PIPE) as process:
                             clip.output(cast(BinaryIO, process.stdin), y4m=False)
