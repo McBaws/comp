@@ -359,8 +359,8 @@ def _get_slowpics_header(content_length: str, content_type: str, sess: Session) 
 
 def screengen(progress, task1, task2, clip: vs.VideoNode, folder: str, suffix: str, frame_numbers: List = None, extended: int = 0, start: int = 1):
     """
-    Stolen from Sea
-    Mod of Narkyy's screenshot generator, stolen from awsmfunc.
+    Stolen from Sea and modified
+    Sea originally modded Narkyy's screenshot generator, stolen from awsmfunc.
     Generates screenshots from a list of frames.
     Not specifying `frame_numbers` will use `ssfunc.util.lazylist()` to generate a list of frames.
     progress, task1, and task2 were added by mcbaws to update the rich progress bar
@@ -378,9 +378,7 @@ def screengen(progress, task1, task2, clip: vs.VideoNode, folder: str, suffix: s
         os.mkdir(folder_path)
 
     for i, num in enumerate(frame_numbers, start=start):
-        filename = "{path}/{:03d} - {suffix}.png".format(
-            i, path=folder_path, suffix=suffix
-        )
+        filename = "{path}/{:03d} - {suffix}.png".format(num, path=folder_path, suffix=suffix)
 
         #use of extended variable is to make sure we dont take the props of blank appended clip
         matrix = clip.get_frame(extended).props._Matrix
@@ -707,9 +705,10 @@ def actual_script():
             #check if a file with the same group name as the analyzed file is present in our current directory
             group_found = False
             for i, dict in enumerate(files_info):
-                if dict.get("release_group").lower() == analyzed_group.lower():
-                    group_found = True
-                    group_file_index = files.index(dict.get("file_name"))
+                if dict.get("release_group") is not None:
+                    if dict.get("release_group").lower() == analyzed_group.lower():
+                        group_found = True
+                        group_file_index = files.index(dict.get("file_name"))
             
             #if file wasn't found but group name was, set file with the same group name
             if analyzed_file not in files and group_found is True:
@@ -839,6 +838,15 @@ def actual_script():
     if os.path.isdir(screen_dir):
         shutil.rmtree(screen_dir)
     os.mkdir(screen_dir)
+
+    #check if ffmpeg is available. if not, run script with ffmpeg disabled
+    global ffmpeg
+    if ffmpeg:
+        try:
+            subprocess.run(["ffmpeg", "-version"], check=True, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        except:
+            ffmpeg = False
+            print("FFmpeg was not found. Continuing to generate screens without it.")
 
     print("Generating screenshots:")
     #initialize progress bar, specify information to be output
