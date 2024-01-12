@@ -54,12 +54,14 @@ hentai_flag = False
 public_flag = True
 # TMDB ID of show or movie being comped. Should be in the format "TV_XXXXXX" or "MOVIE_XXXXXX".
 tmdbID = ""
-# Remove the comparison after N days. Set to 0 to disable.
+# Remove the comparison after this many days. Set to 0 to disable.
 remove_after = 0
 # Output slow.pics link to discord webhook. Disabled if empty.
 webhook_url = r""
 # Automatically open slow.pics url in default browser
 browser_open = True
+# Create a URL shortcut for each comparison uploaded.
+url_shortcut = True
 # Automatically delete the screenshot directory after uploading to slow.pics.
 delete_screen_dir = True
 
@@ -120,7 +122,7 @@ screen_separation = 10
 motion_diff_radius = 4
 
 ### Not recommended to change stuff below
-import os, sys, time, textwrap, re, uuid, random, pathlib, requests, vstools, webbrowser, colorama, shutil, fractions
+import os, sys, time, textwrap, re, uuid, random, pathlib, requests, vstools, webbrowser, colorama, shutil, fractions, subprocess
 from rich.progress import Progress, BarColumn, TextColumn, TimeRemainingColumn
 from natsort import os_sorted
 import anitopy as ani
@@ -873,7 +875,6 @@ def actual_script():
             progress.reset(file_gen_progress, description=message, visible=1)
 
             if ffmpeg:
-                import subprocess
                 
                 #get matrix of clip, account for negative trim "extensions"
                 if trim_dict.get(findex) is not None and trim_dict.get(findex) < 0:
@@ -1028,6 +1029,16 @@ def actual_script():
                 print('Posted to webhook.')
             else:
                 print('Failed to post on webhook!')
+
+        if url_shortcut:
+            #datetime.datetime.now().strftime("%Y.%m.%d") + " - " + 
+            shortcut_path = os.path.join("Comparisons", collection_name + " - " + key + ".url")
+
+            if not os.path.exists(os.path.dirname(shortcut_path)):
+                os.mkdir(os.path.dirname(shortcut_path))
+
+            with open(shortcut_path, "w", encoding='utf-8') as shortcut:
+                shortcut.write(f'[InternetShortcut]\nURL={slowpics_url}')
 
         if delete_screen_dir and os.path.isdir(screen_dir):
             shutil.rmtree(screen_dir)
