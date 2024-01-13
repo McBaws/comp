@@ -1,5 +1,5 @@
 # comp.py
-This script was originally written for VS R53 and Python 3.9. It's been tested on VS R63 and Python 3.11.
+This script was originally written for VS R53 and Python 3.9, and has been tested on VS R65 and Python 3.11.
 
 ### Prerequisites:
 1. [Install Python](https://www.python.org/downloads/)
@@ -13,15 +13,15 @@ This script was originally written for VS R53 and Python 3.9. It's been tested o
 
 4. Install Vapoursynth plugin dependencies:
  ```powershell
- vsrepo install imwri lsmas sub
+ vsrepo install fpng lsmas sub
  ```
   - Alternatively, install the following to your usual Vapoursynth plugins folder:
+    - https://github.com/Mikewando/vsfpng
     - https://github.com/AkarinVS/L-SMASH-Works/releases/latest
     - https://github.com/vapoursynth/subtext/releases/latest
-    - https://github.com/vapoursynth/vs-imwri/releases/latest
     - Note: plugins folder is typically found in `%AppData%\Roaming\VapourSynth\plugins64` or `C:\Program Files\VapourSynth\plugins`
   
-5. Optional: If using [ffmpeg](https://ffmpeg.org/download.html), it must be installed and in PATH.
+5. Optional: If using [FFmpeg](https://ffmpeg.org/download.html), it must be installed and in PATH.
 
 ### How to use:
 - Put `comp.py` into the same folder where the video files you want to compare are located.
