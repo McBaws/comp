@@ -4,7 +4,7 @@ This script was originally written for VS R53 and Python 3.9, and has been teste
 
 You'll need:
 - VapourSynth (https://github.com/vapoursynth/vapoursynth/releases)
-- "pip install pathlib anitopy pyperclip requests requests_toolbelt natsort vstools rich colorama" in terminal (without quotes)
+- "pip install anitopy pyperclip requests requests_toolbelt natsort vstools rich colorama" in terminal (without quotes)
 - "vsrepo install fpng lsmas sub" in terminal (without quotes) or the following installed to your usual VapourSynth plugins folder:
     - https://github.com/Mikewando/vsfpng
     - https://github.com/AkarinVS/L-SMASH-Works/releases/latest
