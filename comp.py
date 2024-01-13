@@ -176,49 +176,6 @@ def FrameInfo(clip: vs.VideoNode,
 
     return clip
 
-def dedupe_old(clip: vs.VideoNode, framelist: list, framecount: int, diff_thr: int, selected_frames: list = [], seed: int = None, motion: bool = False):
-    """
-    Selects frames from a list as long as they aren't too close together.
-    This one's very inefficient.
-    
-    :param framelist:     Detailed list of frames that has to be cut down.
-    :param framecount:    Number of frames to select.
-    :param seed:          Seed for `random.sample()`.
-    :param diff_thr:      Minimum distance between each frame (in seconds).
-    :param motion:        If enabled, the frames will be put in an ordered list, not selected randomly.
-
-    :return:              Deduped framelist
-    """
-
-    if not motion:
-        framelist.sort()
-    
-    framelist_dedupe = [framelist[0]]
-
-    thr = round(clip.fps_num / clip.fps_den * diff_thr)
-    lastval = framelist[0]
-
-    for i in range(1, len(framelist)):
-
-        checklist = framelist[0:i]
-        x = framelist[i]
-
-        for y in checklist:
-            if x >= y + thr and x >= lastval + thr:
-                framelist_dedupe.append(x)
-                lastval = x
-                break
-
-    #if motion, dont select randomly. give ordered list
-    if motion:
-        return framelist_dedupe
-
-    if len(framelist_dedupe) > framecount:
-        random.seed(seed)
-        framelist_dedupe = random.sample(framelist_dedupe, framecount)
-    
-    return framelist_dedupe
-
 def dedupe(clip: vs.VideoNode, framelist: list, framecount: int, diff_thr: int, selected_frames: list = [], seed: int = None, motion: bool = False):
     """
     Selects frames from a list as long as they aren't too close together.
@@ -314,8 +271,6 @@ def lazylist(clip: vs.VideoNode, dark_frames: int = 25, light_frames: int = 15, 
                 diff_clip = vs.core.std.Prewitt(diff_clip)
 
                 diff_clip = diff_clip.std.PlaneStats()
-
-                #print(n, f, diff.get_frame(n))
 
                 diff.append(diff_clip.get_frame(n).props["PlaneStatsAverage"])
 
@@ -420,70 +375,6 @@ def get_highest_res(files: List[str]) -> int:
             max_res_file = filenum
 
     return width, height, max_res_file
-
-def screengen(progress, task1, task2, clip: vs.VideoNode, folder: str, suffix: str, frame_numbers: List = None, extended: int = 0):
-    """
-    Generates screenshots using vsfpng.
-
-    :param clip:             Clip to generate screenshots of.
-    :param folder:           Name of folder where screenshots are saved.
-    :param suffix:           Name prepended to the filename (usually group name).
-    :param frame_numbers:    List of frames to generate screenshots of.
-    :param extended:         Number of black frames added to the beginning of the clip.
-    """
-
-    folder_path = f"./{folder}"
-
-    if not os.path.isdir(folder_path):
-        os.mkdir(folder_path)
-
-    for i, num in enumerate(frame_numbers):
-        filename = f"{folder_path}/{num} - {suffix}.png"
-
-        #use of extended variable is to make sure we dont take the props of blank appended clip
-        matrix = clip.get_frame(extended).props._Matrix
-
-        if matrix == 2:
-            matrix = 1
-            
-        #vs.core.imwri.Write(clip.resize.Spline36(format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion"), "PNG", filename, overwrite=True).get_frame(num)
-        vs.core.fpng.Write(clip.resize.Spline36(format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion"), filename, compression=compression, overwrite=True).get_frame(num)
-
-        progress.update(task1, advance=1)
-        progress.update(task2, advance=1)
-
-def get_frames(clip: vs.VideoNode, frames: List[int]) -> vs.VideoNode:
-    """
-    Gets specified frames from a video source and appends them into one VideoNode.
-    """
-
-    out = clip[frames[0]]
-    for i in frames[1:]:
-        out += clip[i]
-    return out
-
-def estimate_read_time(file, chunk_size: int=15728640):
-    """
-    Estimates the time it would take to read a file.
-    """
-
-    #make sure that we don't read more than the filesize
-    file_size = os.path.getsize(file)
-    if chunk_size >= file_size:
-        chunk_size = file_size - 1
-
-    start_time = time.time()
-    with open(file, 'rb') as f:
-        f.read(chunk_size)
-    elapsed_time = time.time() - start_time
-
-    start_time = time.time()
-    with open(file, 'rb') as f:
-        f.read(chunk_size)
-    elapsed_time = (elapsed_time + time.time() - start_time)/2
-
-    estimated_time = (file_size / chunk_size) * elapsed_time
-    return estimated_time
 
 def estimate_analysis_time(file, read_len: int=15):
     """
@@ -871,13 +762,6 @@ def run_comparison():
         #get list of all frames in clip
         frame_ranges = list(range(0, init_clip(files[0], files, trim_dict, trim_dict_end, change_fps).num_frames))
 
-        '''#removes any frame within frames_near distance of any frame in "frames" list
-        frame_ranges = [frame for frame in frame_ranges if all(abs(frame - f) > frames_near for f in frames)]
-        
-        #makes sure there are enough valid frames to sample from. if not, just passes all valid frames
-        if len(frame_ranges) > random_frames:
-            frame_ranges = random.sample(frame_ranges, random_frames)'''
-
         #randomly selects frames at least screen_separation seconds apart
         frame_ranges = dedupe(init_clip(files[0], files, trim_dict, trim_dict_end, change_fps), frame_ranges, random_frames, screen_separation, frames)
 
@@ -1026,16 +910,18 @@ def run_comparison():
         
         for x in range(0, len(frames)):
             #current_comp is list of image files for this frame
-            
             current_comp = [f for f in all_image_files if f.startswith(str(frames[x]) + " - ")]
+
             #add field for comparison name. after every comparison name there needs to be as many image names as there are comped video files
             fields[f'comparisons[{x}].name'] = str(frames[x])
+            
             #iterate over the image files for this frame
             for imageName in current_comp:
                 i = current_comp.index(imageName)
                 image = pathlib.Path(f"{screen_dir}/{imageName}")
                 fields[f'comparisons[{x}].imageNames[{i}]'] = os.path.basename(image.name).split(' - ', 1)[1].replace(".png", "")
-                ##this would upload the images all at once, but that wouldnt let us get progress
+
+                #this would upload the images all at once, but that wouldnt let us get progress
                 #fields[f'comparisons[{x}].images[{i}].file'] = (image.name.split(' - ', 1)[1].replace(".png", ""), image.read_bytes(), 'image/png')
 
         with Session() as sess:
@@ -1053,7 +939,6 @@ def run_comparison():
             collection = comp_response["collectionUuid"]
             key = comp_response["key"]
 
-            #print("\n", comp_response["images"])
             with Progress(TextColumn("{task.description}"), BarColumn(), TextColumn("{task.completed}/{task.total}"), TextColumn("{task.percentage:>3.02f}%"), TimeRemainingColumn()) as progress:
                 upload_progress = progress.add_task("[bright_magenta]Uploading to Slowpoke Pics", total=len(all_image_files))
 
@@ -1061,7 +946,6 @@ def run_comparison():
                     base = index * file_count
                     for image_index, image_id in enumerate(image_section):
 
-                        #print("\nbase:", base, "\nimage_index:", image_index)
                         upload_info = {
                             "collectionUuid": collection,
                             "imageUuid": image_id,
