@@ -1,16 +1,16 @@
 """
 I do not provide support for this unless its an actual error in the code and not related to your setup.
-This script was originally written for VS R53 and Python 3.9. It's been tested on VS R63 and Python 3.11.
+This script was originally written for VS R53 and Python 3.9, and has been tested on VS R65 and Python 3.11.
 
 You'll need:
-- Vapoursynth (https://github.com/vapoursynth/vapoursynth/releases)
+- VapourSynth (https://github.com/vapoursynth/vapoursynth/releases)
 - "pip install pathlib anitopy pyperclip requests requests_toolbelt natsort vstools rich colorama" in terminal (without quotes)
-- "vsrepo install imwri lsmas sub" in terminal (without quotes) or the following installed to your usual Vapoursynth plugins folder:
+- "vsrepo install fpng lsmas sub" in terminal (without quotes) or the following installed to your usual VapourSynth plugins folder:
+    - https://github.com/Mikewando/vsfpng
     - https://github.com/AkarinVS/L-SMASH-Works/releases/latest
     - https://github.com/vapoursynth/subtext/releases/latest
-    - https://github.com/vapoursynth/vs-imwri/releases/latest
     - Note: plugins folder is typically found in "%AppData%\Roaming\VapourSynth\plugins64" or "C:\Program Files\VapourSynth\plugins"
-- Optional: If using ffmpeg, ffmpeg must be installed and in PATH.
+- Optional: If using FFmpeg, it must be installed and in PATH.
 
 How to use:
 - Drop comp.py into a folder with the video files you want to compare.
@@ -30,22 +30,22 @@ frame_count_motion = 15
 # Choose your own frames to export. Does not decrease the number of algorithmically selected frames.
 user_frames = []
 # Number of frames to choose randomly. Completely separate from frame_count_bright, frame_count_dark, and save_frames. Will change every time you run the script.
-random_frames = 0
+random_frames = 15
 
 # Save the brightness data in a text file so it doesn't have to be reanalysed next time the script is run. Frames will be reanalysed if show/movie name or episode numbers change.
 # Does not save user_frames or random_frames.
 save_frames = True
 
-# Use ffmpeg as the image renderer. (ffmpeg needs to be in path)
-ffmpeg = True
 # Print frame info on screenshots.
 frame_info = True
 # Upscale videos to make the clips match the highest found res.
 upscale = True
 # Scale all videos to one vertical resolution. Set to 0 to disable, otherwise input the desired vertical res.
 single_res = 0
-# Compression level for ffmpeg. Range is 0-100.
-compression = 2
+# Use FFmpeg as the image renderer. If false, fpng is used instead
+ffmpeg = False
+# Compression level. For FFmpeg, range is 0-100. For fpng, 0 is fast, 1 is slow, 2 is uncompressed.
+compression = 1
 
 # Automatically upload to slow.pics.
 slowpics = True
@@ -90,7 +90,7 @@ Second input can also be the string "set". This will make all other files, if un
 
 Example:
 change_fps = {0: [24, 1], 1: [24000, 1001]}
-First clip will have its fps adjusted to 24fps
+First clip will have its fps adjusted to 24
 Second clip will have its fps adjusted to 23.976
 
 Example 2:
@@ -115,8 +115,8 @@ random_seed = 20202020
 frame_filename = "generated.compframes"
 # Directory in which the screenshots will be kept
 screen_dirname = "screens"
-# Minimum time between dark and light frames, in seconds. Motion frames use half this value
-screen_separation = 10
+# Minimum time between dark, light, and random frames, in seconds. Motion frames use a quarter of this value
+screen_separation = 6
 # Number of frames in each direction over which the motion data will be averaged out. So a radius of 4 would take the average of 9 frames, the frame in the middle, and 4 in each direction.
 # Higher value will make it less likely scene changes get picked up as motion, but may lead to less precise results.
 motion_diff_radius = 4
@@ -147,6 +147,7 @@ def FrameInfo(clip: vs.VideoNode,
     FrameInfo function stolen from awsmfunc, implemented by LibreSneed
     Prints the frame number, frame type and a title on the clip
     """
+
     def FrameProps(n: int, f: vs.VideoFrame, clip: vs.VideoNode, padding: Optional[str]) -> vs.VideoNode:
         if "_PictType" in f.props:
             info = f"Frame {n} of {clip.num_frames}\nPicture type: {f.props['_PictType'].decode()}"
@@ -175,9 +176,22 @@ def FrameInfo(clip: vs.VideoNode,
 
     return clip
 
-#used in lazylist to select frames
-def dedupe(clip: vs.VideoNode, framelist: list, framecount: int, diff_thr: int, seed: int = None, motion: bool = False):
-    framelist.sort()
+def dedupe_old(clip: vs.VideoNode, framelist: list, framecount: int, diff_thr: int, selected_frames: list = [], seed: int = None, motion: bool = False):
+    """
+    Selects frames from a list as long as they aren't too close together.
+    This one's very inefficient.
+    
+    :param framelist:     Detailed list of frames that has to be cut down.
+    :param framecount:    Number of frames to select.
+    :param seed:          Seed for `random.sample()`.
+    :param diff_thr:      Minimum distance between each frame (in seconds).
+    :param motion:        If enabled, the frames will be put in an ordered list, not selected randomly.
+
+    :return:              Deduped framelist
+    """
+
+    if not motion:
+        framelist.sort()
     
     framelist_dedupe = [framelist[0]]
 
@@ -205,25 +219,68 @@ def dedupe(clip: vs.VideoNode, framelist: list, framecount: int, diff_thr: int, 
     
     return framelist_dedupe
 
-def lazylist(clip: vs.VideoNode, dark_frames: int = 25, light_frames: int = 15, motion_frames: int = 0, seed: int = random_seed, diff_thr: int = screen_separation, diff_radius: int = motion_diff_radius,
-             dark_list: list = None, light_list: list = None, motion_list: list = None, save_frames: bool = False, file: str = None, files: list = None, files_info: list = None):
+def dedupe(clip: vs.VideoNode, framelist: list, framecount: int, diff_thr: int, selected_frames: list = [], seed: int = None, motion: bool = False):
     """
-    Blame Sea for what this shits out.
-    A function for generating a list of frames for comparison purposes.
-    Works by running `core.std.PlaneStats()` on the input clip,
-    iterating over all frames, and sorting all frames into 2 lists
-    based on the PlaneStatsAverage value of the frame.
-    Randomly picks frames from both lists, 8 from `dark` and 4
-    from `light` by default.
-    :param clip:          Input clip
-    :param dark_frame:    Number of dark frames
-    :param light_frame:   Number of light frames
-    :param seed:          seed for `random.sample()`
-    :param diff_thr:      Minimum distance between each frames (In seconds)
-    :return:              List of dark and light frames
+    Selects frames from a list as long as they aren't too close together.
+    
+    :param framelist:     Detailed list of frames that has to be cut down.
+    :param framecount:    Number of frames to select.
+    :param seed:          Seed for `random.sample()`.
+    :param diff_thr:      Minimum distance between each frame (in seconds).
+    :param motion:        If enabled, the frames will be put in an ordered list, not selected randomly.
+
+    :return:              Deduped framelist
     """
 
-    all_dedupe = []
+    random.seed(seed)
+    thr = round(clip.fps_num / clip.fps_den * diff_thr)
+    initial_length = len(selected_frames)
+
+    while (len(selected_frames) - initial_length) < framecount and len(framelist) > 0:
+        dupe = False
+
+        #get random frame from framelist with removal. if motion, get first frame     
+        if motion:
+            rand = framelist.pop(0)
+        else:
+            rand = framelist.pop(random.randint(0, len(framelist) - 1))
+
+        #check if it's too close to an already selected frame
+        for selected_frame in selected_frames:
+            if abs(selected_frame - rand) < thr:
+                dupe = True
+                break
+
+        if not dupe:
+            selected_frames.append(rand)
+
+    selected_frames.sort()
+    
+    return selected_frames
+
+def lazylist(clip: vs.VideoNode, dark_frames: int = 25, light_frames: int = 15, motion_frames: int = 0, selected_frames: list = [], seed: int = random_seed,
+             diff_thr: int = screen_separation, diff_radius: int = motion_diff_radius, dark_list: list = None, light_list: list = None, motion_list: list = None, 
+             save_frames: bool = False, file: str = None, files: list = None, files_info: list = None):
+    """
+    Generates a list of frames for comparison purposes.
+
+    :param clip:             Input clip.
+    :param dark_frames:      Number of dark frames.
+    :param light_frames:     Number of light frames.
+    :param motion_frames:    Number of frames with high level of motion.
+    :param seed:             Seed for `random.sample()`.
+    :param diff_thr:         Minimum distance between each frame (in seconds).
+    :param diff_thr:         Number of frames to take into account when finding high motion frames.
+    :param dark_list:        Pre-existing detailed list of dark frames that needs to be sorted.
+    :param light_list:       Pre-existing detailed list of light frames that needs to be sorted.
+    :param motion_list:      Pre-existing detailed list of high motion frames that needs to be sorted.
+    :param save_frames:      If true, returns detailed lists with every type of frame.
+    :param file:             File being analyzed.
+    :param files:            List of files in directory.
+    :param files_info:       Information for each file in directory.
+
+    :return:                 List of dark, light, and high motion frames.
+    """
 
     #if no frames were requested, return empty list before running algorithm
     if dark_frames + light_frames + motion_frames == 0:
@@ -286,9 +343,8 @@ def lazylist(clip: vs.VideoNode, dark_frames: int = 25, light_frames: int = 15, 
         diff = motion_list 
 
     #remove frames that are within diff_thr seconds of other frames. for dark and light, select random frames as well
-    dark_dedupe = dedupe(clip, dark, dark_frames, diff_thr, seed)
-    light_dedupe = dedupe(clip, light, light_frames, diff_thr, seed)
-    all_dedupe += (dark_dedupe + light_dedupe)   
+    selected_frames = dedupe(clip, dark, dark_frames, diff_thr, selected_frames, seed)
+    selected_frames = dedupe(clip, light, light_frames, diff_thr, selected_frames, seed)
 
     #find frames with most motion
     if motion_frames > 0:
@@ -308,28 +364,11 @@ def lazylist(clip: vs.VideoNode, dark_frames: int = 25, light_frames: int = 15, 
         #sort avg_diff list based on the diff values, not the frame numbers
         sorted_avg_diff = sorted(avg_diff, key=lambda x: x[1], reverse=True)
 
-        #remove frames that are in light or dark list from motion list
-        for i in sorted_avg_diff:
-            if i[0] in dark_dedupe or i[0] in light_dedupe:
-                sorted_avg_diff.remove(i)
+        for i in range(0, len(sorted_avg_diff)):
+            motion.append(sorted_avg_diff[i][0])
 
-        #get first motion_frames frames from sorted_avg_diff and dedupe them
-        #if less than motion_frames left, repeat
-        while len(motion) < motion_frames and len(sorted_avg_diff) > 0:
-
-            for i in range(0, motion_frames):
-                if len(sorted_avg_diff) > 0:
-                    motion.append(sorted_avg_diff.pop(i)[0])
-
-            #remove frames that are too close to other frames. uses lower diff_thr because high motion frames will be different from one another
-            motion = dedupe(clip, motion, motion_frames, round(diff_thr/2), seed, motion=True)
-
-        #remove dark and light frames from motion_dedupe
-        for frame in motion:
-            if frame in dark_dedupe or frame in light_dedupe:
-                motion.remove(frame)
-
-        all_dedupe += motion
+        #remove frames that are too close to other frames. uses lower diff_thr because high motion frames will be different from one another
+        selected_frames = dedupe(clip, motion, motion_frames, round(diff_thr/4), selected_frames, seed, motion=True)
 
     print()
 
@@ -338,14 +377,15 @@ def lazylist(clip: vs.VideoNode, dark_frames: int = 25, light_frames: int = 15, 
         light_list = light
         motion_list = diff
 
-        return all_dedupe, dark_list, light_list, motion_list
+        return selected_frames, dark_list, light_list, motion_list
     else:
-        return all_dedupe
+        return selected_frames
 
 def _get_slowpics_header(content_length: str, content_type: str, sess: Session) -> Dict[str, str]:
     """
-    Stolen from vardefunc, fixed by Jimbo
+    Stolen from vardefunc, fixed by Jimbo.
     """
+
     return {
         "Accept": "*/*",
         "Accept-Encoding": "gzip, deflate",
@@ -359,50 +399,15 @@ def _get_slowpics_header(content_length: str, content_type: str, sess: Session) 
         "X-XSRF-TOKEN": sess.cookies.get_dict()["XSRF-TOKEN"]
     }
 
-def screengen(progress, task1, task2, clip: vs.VideoNode, folder: str, suffix: str, frame_numbers: List = None, extended: int = 0, start: int = 1):
-    """
-    Stolen from Sea and modified
-    Sea originally modded Narkyy's screenshot generator, stolen from awsmfunc.
-    Generates screenshots from a list of frames.
-    Not specifying `frame_numbers` will use `ssfunc.util.lazylist()` to generate a list of frames.
-    progress, task1, and task2 were added by mcbaws to update the rich progress bar
-    :param folder:            Name of folder where screenshots are saved.
-    :param suffix:            Name prepended to screenshots (usually group name).
-    :param frame_numbers:     List of frames to generate screenshots of.
-    :param start:             Frame to start from.
-    :param delim:             Delimiter for the external file.
-    """
-
-    folder_path = f"./{folder}"
-
-
-    if not os.path.isdir(folder_path):
-        os.mkdir(folder_path)
-
-    for i, num in enumerate(frame_numbers, start=start):
-        filename = "{path}/{:03d} - {suffix}.png".format(num, path=folder_path, suffix=suffix)
-
-        #use of extended variable is to make sure we dont take the props of blank appended clip
-        matrix = clip.get_frame(extended).props._Matrix
-
-        if matrix == 2:
-            matrix = 1
-
-        #print(f"Saving Frame {i}/{len(frame_numbers)} from {suffix}", end="\r")
-        vs.core.imwri.Write(
-            clip.resize.Spline36(
-                format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion"
-            ),
-            "PNG",
-            filename,
-            overwrite=True,
-        ).get_frame(num)
-
-        progress.update(task1, advance=1)
-        progress.update(task2, advance=1)
-
-#find video source with the highest resolution
 def get_highest_res(files: List[str]) -> int:
+    """
+    Finds the video source with the highest resolution from a list of files.
+
+    :param files:    The list of files in question.
+
+    :return:         The width, height, and filename of the highest resolution video.
+    """
+
     height = 0
     width = 0
     filenum = -1
@@ -416,16 +421,52 @@ def get_highest_res(files: List[str]) -> int:
 
     return width, height, max_res_file
 
-#get frames from a video source and appends them into one videonode
+def screengen(progress, task1, task2, clip: vs.VideoNode, folder: str, suffix: str, frame_numbers: List = None, extended: int = 0):
+    """
+    Generates screenshots using vsfpng.
+
+    :param clip:             Clip to generate screenshots of.
+    :param folder:           Name of folder where screenshots are saved.
+    :param suffix:           Name prepended to the filename (usually group name).
+    :param frame_numbers:    List of frames to generate screenshots of.
+    :param extended:         Number of black frames added to the beginning of the clip.
+    """
+
+    folder_path = f"./{folder}"
+
+    if not os.path.isdir(folder_path):
+        os.mkdir(folder_path)
+
+    for i, num in enumerate(frame_numbers):
+        filename = f"{folder_path}/{num} - {suffix}.png"
+
+        #use of extended variable is to make sure we dont take the props of blank appended clip
+        matrix = clip.get_frame(extended).props._Matrix
+
+        if matrix == 2:
+            matrix = 1
+            
+        #vs.core.imwri.Write(clip.resize.Spline36(format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion"), "PNG", filename, overwrite=True).get_frame(num)
+        vs.core.fpng.Write(clip.resize.Spline36(format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion"), filename, compression=compression, overwrite=True).get_frame(num)
+
+        progress.update(task1, advance=1)
+        progress.update(task2, advance=1)
+
 def get_frames(clip: vs.VideoNode, frames: List[int]) -> vs.VideoNode:
+    """
+    Gets specified frames from a video source and appends them into one VideoNode.
+    """
+
     out = clip[frames[0]]
     for i in frames[1:]:
         out += clip[i]
     return out
 
-#estimates time it would take to read a file
-#default size to read is 15 MB
 def estimate_read_time(file, chunk_size: int=15728640):
+    """
+    Estimates the time it would take to read a file.
+    """
+
     #make sure that we don't read more than the filesize
     file_size = os.path.getsize(file)
     if chunk_size >= file_size:
@@ -444,9 +485,13 @@ def estimate_read_time(file, chunk_size: int=15728640):
     estimated_time = (file_size / chunk_size) * elapsed_time
     return estimated_time
 
-#estimates time it would take to analyze a clip
-#default frames to read is 15
 def estimate_analysis_time(file, read_len: int=15):
+    """
+    Estimates the time it would take to analyze a video source.
+
+    :param read_len:    How many frames to read from the video.
+    """
+
     clip = vs.core.lsmas.LWLibavSource(file)
 
     #safeguard for if there arent enough frames in clip
@@ -470,11 +515,14 @@ def estimate_analysis_time(file, read_len: int=15):
 
     return elapsed_time
 
-#determine which file should be analyzed in order to select frames
 def evaluate_analyze_clip(analyze_clip, files, files_info):
+    """
+    Determines which file should be analyzed by lazylist.
+    """
+
     file_analysis_default = False
 
-    #check if analyze_clip is an int or string with an int in it
+    #check if analyze_clip is an int or string with just an int in it
     if (isinstance(analyze_clip, int) and analyze_clip >= 0) or (isinstance(analyze_clip, str) and analyze_clip.isdigit() and int(analyze_clip) >= 0):
         first_file = files[int(analyze_clip)]
 
@@ -505,8 +553,11 @@ def evaluate_analyze_clip(analyze_clip, files, files_info):
     
     return first_file
 
-#get clip from file, apply trims to clip
-def init_clip(file: str, files: list, trim_dict: dict, trim_dict_end: dict, change_fps: dict = {}, analyze_clip: str = None, files_info: list = None, return_file: bool = False):
+def init_clip(file: str, files: list, trim_dict: dict, trim_dict_end: dict, change_fps: dict = {}, 
+              analyze_clip: str = None, files_info: list = None, return_file: bool = False):
+    """
+    Gets trimmed and fps modified clip from video file.
+    """
 
     #evaluate analyze_clip if it hasn't been already
     if analyze_clip is not None and file is None and first_file is None:
@@ -537,8 +588,11 @@ def init_clip(file: str, files: list, trim_dict: dict, trim_dict_end: dict, chan
     else:
         return clip
 
-#get group name or file name
 def get_suffix(file: str, files: list, files_info: list):
+    """
+    Gets group name from file name, otherwise just returns the file name.
+    """
+
     findex = files.index(file)
     suffix = None
 
@@ -549,8 +603,11 @@ def get_suffix(file: str, files: list, files_info: list):
 
     return suffix
 
-#convert a string to a float or int if possible
 def str_to_number(string: str):
+    """
+    Converts a string to a float or int if possible.
+    """
+
     try:
         float(string)
         try:
@@ -560,9 +617,21 @@ def str_to_number(string: str):
             return float(string)
     except:
         return string
+    
+def extend_clip(clip: vs.VideoNode, frames: list):
+    """
+    If a clip is shorter than the largest frame that needs to be rendered, extend it.
+    """
+
+    if clip.num_frames < frames[-1]:
+        clip = clip + (vs.core.std.BlankClip(clip)[0] * (frames[-1] - clip.num_frames + 1))
+
+    return clip
 
 
-def actual_script():
+def run_comparison():
+    #START_TIME = time.time()
+
     global first_file
     first_file = None
     #first file is only determined by analyze_clip if it is called 
@@ -676,7 +745,12 @@ def actual_script():
     if (upscale and single_res > 0):
         sys.exit("Can't use 'upscale' and 'single_res' functions at the same time.")
 
+    
+    
     frames = []
+
+    #add user specified frames to list
+    frames.extend(user_frames)
 
     #if save_frames is enabled, store generated brightness data in a text file, so they don't have to be analyzed again
     if save_frames and (frame_count_dark + frame_count_bright + frame_count_motion) > 0:
@@ -751,7 +825,7 @@ def actual_script():
             #only spend time processing lazylist if we need to
             elif (frame_count_dark + frame_count_bright + frame_count_motion) > 0:
                 clip = init_clip(files[0], files, trim_dict, trim_dict_end, change_fps, analyze_clip, files_info)
-                frames.extend(lazylist(clip, frame_count_dark, frame_count_bright, frame_count_motion, dark_list=dark_list, light_list=light_list, motion_list=motion_list, file=files[0], files=files, files_info=files_info))
+                frames.extend(lazylist(clip, frame_count_dark, frame_count_bright, frame_count_motion, frames, dark_list=dark_list, light_list=light_list, motion_list=motion_list, file=files[0], files=files, files_info=files_info))
 
         #if frame file does not exist or has less frames than specified, write to it
         if not os.path.exists(frame_filename) or os.stat(frame_filename).st_size == 0 or mismatch:
@@ -768,7 +842,7 @@ def actual_script():
                 first_trim_end = trim_dict_end[files.index(first_file)]
 
 
-            frames_temp, dark_list, light_list, motion_list = lazylist(first, frame_count_dark, frame_count_bright, frame_count_motion, save_frames=True, file=first_file, files=files, files_info=files_info)
+            frames_temp, dark_list, light_list, motion_list = lazylist(first, frame_count_dark, frame_count_bright, frame_count_motion, frames, save_frames=True, file=first_file, files=files, files_info=files_info)
             frames.extend(frames_temp)
             
             with open(frame_filename, 'w') as frame_file:
@@ -785,11 +859,10 @@ def actual_script():
                 for val in motion_list:
                     frame_file.write(f"{val}\n")
 
-    
     #if save_frames isn't enabled, run lazylist
     elif (frame_count_dark + frame_count_bright + frame_count_motion) > 0:
         first, first_file = init_clip(first_file, files, trim_dict, trim_dict_end, change_fps, analyze_clip, files_info, return_file=True)
-        frames.extend(lazylist(first, frame_count_dark, frame_count_bright, frame_count_motion, file=first_file, files=files, files_info=files_info))
+        frames.extend(lazylist(first, frame_count_dark, frame_count_bright, frame_count_motion, frames, file=first_file, files=files, files_info=files_info))
 
     if random_frames > 0:
 
@@ -805,13 +878,10 @@ def actual_script():
         if len(frame_ranges) > random_frames:
             frame_ranges = random.sample(frame_ranges, random_frames)'''
 
-        #removes duplicate frames and randomly selects
-        frame_ranges = dedupe(init_clip(files[0], files, trim_dict, trim_dict_end, change_fps), frame_ranges, random_frames, diff_thr=4)
+        #randomly selects frames at least screen_separation seconds apart
+        frame_ranges = dedupe(init_clip(files[0], files, trim_dict, trim_dict_end, change_fps), frame_ranges, random_frames, screen_separation, frames)
 
         frames.extend(frame_ranges)
-
-    #add user specified frames to list
-    frames.extend(user_frames)
 
     #remove dupes and sort
     frames = [*set(frames)]
@@ -831,6 +901,8 @@ def actual_script():
         first = False
         message+=str(f)
     print(textwrap.fill(message, os.get_terminal_size().columns), end="\n\n")
+
+
 
     if upscale:
         max_width, max_height, max_res_file = get_highest_res(files)
@@ -860,8 +932,11 @@ def actual_script():
 
         for file in files:
             findex = files.index(file)
-            extended = 0
+
             clip = init_clip(file, files, trim_dict, trim_dict_end, change_fps)
+
+            #extend clip if a frame is out of range
+            clip = extend_clip(clip, frames)
 
             #get release group or filename of file
             suffix = get_suffix(file, files, files_info)
@@ -873,67 +948,54 @@ def actual_script():
             else:
                 message = f'[cyan]{suffix}'
             progress.reset(file_gen_progress, description=message, visible=1)
-
-            if ffmpeg:
                 
-                #get matrix of clip, account for negative trim "extensions"
-                if trim_dict.get(findex) is not None and trim_dict.get(findex) < 0:
-                    matrix = clip.get_frame(trim_dict.get(findex) * -1).props._Matrix
-                else:
-                    matrix = clip.get_frame(0).props._Matrix
+            #get matrix of clip, account for black clips added to the beginning due to negative trim
+            if trim_dict.get(findex) is not None and trim_dict.get(findex) < 0:
+                matrix = clip.get_frame(trim_dict.get(findex) * -1).props._Matrix
+            else:
+                matrix = clip.get_frame(0).props._Matrix
 
-                if matrix == 2:
-                    matrix = 1
+            #if matrix is unspecified, change it to 709
+            if matrix == 2:
+                matrix = 1
 
-                #upscale depending on options selected. if none are, just convert colorspace
-                if single_res > 0 and clip.height != single_res:
-                    clip = vs.core.resize.Spline36(clip, int(round(clip.width * (single_res / clip.height), 0)), single_res, format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion")
-                elif upscale and clip.height != max_height:
-                    clip = vs.core.resize.Spline36(clip, int(round(clip.width * (max_height / clip.height), 0)), max_height, format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion")
-                else:
-                    clip = clip.resize.Spline36(format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion")
+            #upscale depending on options selected. if none are, just convert to rgb
+            if single_res > 0 and clip.height != single_res:
+                #clip = clip.resize.Spline36(format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion")
+                #clip = vs.core.placebo.Resample(clip, int(round(clip.width * (single_res / clip.height), 0)), single_res, filter="ewa_lanczossharp", antiring=0.6)
 
-                #if frame_info option selected, print frame info to screen
-                if frame_info:
-                    clip = FrameInfo(clip, title=suffix)
-                
-                #get a clip with only the desired frames appended to one another
-                clip = get_frames(clip, frames)
-                clip = clip.std.ShufflePlanes([1, 2, 0], vs.RGB).std.AssumeFPS(fpsnum=1, fpsden=1)
+                clip = vs.core.resize.Spline36(clip, int(round(clip.width * (single_res / clip.height), 0)), single_res, format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion")
+            elif upscale and clip.height != max_height:
+                clip = vs.core.resize.Spline36(clip, int(round(clip.width * (max_height / clip.height), 0)), max_height, format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion")
+            else:
+                clip = clip.resize.Spline36(format=vs.RGB24, matrix_in=matrix, dither_type="error_diffusion")
 
-                path_images = [
-                    f"{screen_dir}/{f} - {suffix}.png"
-                    for f in frames
-                ]
+            #if frame_info option selected, print frame info to screen
+            if frame_info:
+                clip = FrameInfo(clip, title=suffix)
+            
+            #generate screens
+            for i, frame in enumerate(frames):
 
-                #generate screens with ffmpeg
-                for i, path_image in enumerate(path_images):
+                filename = f"{screen_dir}/{frame} - {suffix}.png"
 
-                    ffmpeg_line = f"ffmpeg -y -hide_banner -loglevel error -f rawvideo -video_size {clip.width}x{clip.height} -pixel_format gbrp -framerate {str(clip.fps)} -i pipe: -pred mixed -ss {i} -t 1 -compression_level {compression} \"{path_image}\""
+                if ffmpeg:
+                    ffmpeg_line = f"ffmpeg -y -hide_banner -loglevel error -f rawvideo -video_size {clip.width}x{clip.height} -pixel_format gbrp -framerate {str(clip.fps)} -i pipe: -pred mixed -compression_level {compression} \"{filename}\""
                     try:
                         with subprocess.Popen(ffmpeg_line, stdin=subprocess.PIPE) as process:
-                            clip.output(cast(BinaryIO, process.stdin), y4m=False)
+                            #ffmpeg needs these planes to be shuffled so they are in gbrp pixel_format (the p is important, rgb24 format doesnt work)
+                            clip[frame].std.ShufflePlanes([1, 2, 0], vs.RGB).output(cast(BinaryIO, process.stdin), y4m=False)
                     except:
                         None
-                    
-                    progress.update(total_gen_progress, advance=1)
-                    progress.update(file_gen_progress, advance=1)
 
-
-            else:
-                #upscale depending on options selected
-                if single_res > 0 and clip.height != single_res:
-                    clip = vs.core.resize.Spline36(clip, int(round(clip.width * (single_res / clip.height), 0)), single_res, dither_type="error_diffusion")
-                elif upscale and clip.height != max_height:
-                    clip = vs.core.resize.Spline36(clip, int(round(clip.width * (max_height / clip.height), 0)), max_height, dither_type="error_diffusion")
-
-                #if frame_info option selected, print frame info to screen
-                if frame_info:
-                    clip = FrameInfo(clip, title=suffix)
-
-                screengen(progress, total_gen_progress, file_gen_progress, clip, screen_dirname, suffix, frames, extended)
+                else:
+                    vs.core.fpng.Write(clip, filename, compression=compression, overwrite=True).get_frame(frame)
+                
+                progress.update(total_gen_progress, advance=1)
+                progress.update(file_gen_progress, advance=1)
 
     print()
+    #print(time.time() - START_TIME)
 
     if slowpics:
         #time.sleep(0.5)
@@ -964,6 +1026,7 @@ def actual_script():
         
         for x in range(0, len(frames)):
             #current_comp is list of image files for this frame
+            
             current_comp = [f for f in all_image_files if f.startswith(str(frames[x]) + " - ")]
             #add field for comparison name. after every comparison name there needs to be as many image names as there are comped video files
             fields[f'comparisons[{x}].name'] = str(frames[x])
@@ -1045,4 +1108,4 @@ def actual_script():
 
         time.sleep(3)
 
-actual_script()
+run_comparison()
