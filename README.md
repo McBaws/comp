@@ -8,7 +8,7 @@ This script was originally written for VS R53 and Python 3.9, and has been teste
 
 3. Install Python dependencies:
  ```powershell
- pip install pathlib anitopy pyperclip requests requests_toolbelt natsort vstools rich colorama
+ pip install anitopy pyperclip requests requests_toolbelt natsort vstools rich colorama
  ```
 
 4. Install Vapoursynth plugin dependencies:
