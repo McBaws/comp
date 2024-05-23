@@ -1,4 +1,4 @@
-"""
+r"""
 I do not provide support for this unless its an actual error in the code and not related to your setup.
 This script was originally written for VS R53 and Python 3.9, and has been tested on VS R65 and Python 3.11.
 
@@ -706,7 +706,7 @@ def run_comparison():
         collection_name = anime_episode_title.strip()
     else:
         collection_name = files_info[0].get('file_name')
-        collection_name = re.sub("\[.*?\]|\(.*?\}|\{.*?\}|\.[^.]+$", "", collection_name).strip()
+        collection_name = re.sub(r"\[.*?\]|\(.*?\}|\{.*?\}|\.[^.]+$", "", collection_name).strip()
     
     #if anime title still isn't found, give it collection name
     if anime_title == "":
